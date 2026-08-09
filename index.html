@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Traceur de Finances Personnelles Interactif</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --subtext: #64748b;
+      --border: #e2e8f0;
+      --primary: #2563eb;
+      --income: #16a34a;
+      --expense: #dc2626;
+      --warning: #f59e0b;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 2rem 1rem; }
+    .container { max-width: 950px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.5rem; }
+    
+    h1 { font-size: 1.8rem; font-weight: 700; text-align: center; margin-bottom: 0.5rem; }
+
+    /* Cartes de Résumé */
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    .card { background: var(--card); padding: 1.25rem; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .card-title { font-size: 0.875rem; color: var(--subtext); margin-bottom: 0.5rem; }
+    .card-value { font-size: 1.5rem; font-weight: 700; }
+    .card-value.income { color: var(--income); }
+    .card-value.expense { color: var(--expense); }
+
+    /* Layout Principal */
+    .main-grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+    @media (min-width: 768px) { .main-grid { grid-template-columns: 1fr 1fr; } }
+
+    /* Formulaire */
+    form { display: flex; flex-direction: column; gap: 1rem; }
+    .form-group { display: flex; flex-direction: column; gap: 0.35rem; }
+    label { font-size: 0.875rem; font-weight: 500; }
+    input, select, button { padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); font-size: 0.95rem; outline: none; }
+    input:focus, select:focus { border-color: var(--primary); }
+    
+    .type-toggle { display: flex; gap: 0.5rem; }
+    .type-btn { flex: 1; border: 1px solid var(--border); background: var(--bg); cursor: pointer; font-weight: 600; }
+    .type-btn.active-income { background: #dcfce7; color: var(--income); border-color: var(--income); }
+    .type-btn.active-expense { background: #fee2e2; color: var(--expense); border-color: var(--expense); }
+
+    .submit-btn { background: var(--primary); color: white; border: none; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+    .submit-btn:hover { opacity: 0.9; }
+
+    /* Graphique */
+    .chart-container { position: relative; height: 250px; display: flex; justify-content: center; align-items: center; }
+    #expenseChart { cursor: pointer; } /* Indique l'interactivité */
+
+    /* Section Budgets & Barres de progression */
+    .budget-list { display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; }
+    .budget-item { display: flex; flex-direction: column; gap: 0.35rem; }
+    .budget-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; }
+    .budget-cat { font-weight: 600; }
+    .budget-stats { color: var(--subtext); font-size: 0.85rem; }
+    .budget-input-wrapper { display: flex; align-items: center; gap: 0.25rem; }
+    .budget-input { width: 80px; padding: 0.2rem 0.4rem; font-size: 0.85rem; text-align: right; }
+    
+    .progress-bar-bg { height: 10px; background: var(--border); border-radius: 5px; overflow: hidden; position: relative; }
+    .progress-bar-fill { height: 100%; width: 0%; transition: width 0.3s, background-color 0.3s; }
+    
+    .status-ok { background-color: var(--income); }
+    .status-warning { background-color: var(--warning); }
+    .status-exceeded { background-color: var(--expense); }
+
+    /* Liste des transactions */
+    .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    .view-all-btn { padding: 0.4rem 0.8rem; font-size: 0.8rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; color: var(--primary); font-weight: 500; display: none;}
+    .view-all-btn:hover { background: #eff6ff; }
+
+    .transaction-list { list-style: none; display: flex; flex-direction: column; gap: 0.5rem; max-height: 250px; overflow-y: auto; }
+    .transaction-item { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+    .item-info { display: flex; flex-direction: column; }
+    .item-desc { font-weight: 600; }
+    .item-cat { font-size: 0.75rem; color: var(--subtext); }
+    .item-right { display: flex; align-items: center; gap: 1rem; }
+    .item-amount { font-weight: 700; }
+    .delete-btn { background: none; border: none; color: var(--subtext); cursor: pointer; font-size: 1.1rem; }
+    .delete-btn:hover { color: var(--expense); }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Traceur de Finances</h1>
+
+  <!-- Synthèse -->
+  <div class="summary-grid">
+    <div class="card">
+      <div class="card-title">Solde Total</div>
+      <div class="card-value" id="totalBalance">0,00 €</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Revenus</div>
+      <div class="card-value income" id="totalIncome">+0,00 €</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Dépenses</div>
+      <div class="card-value expense" id="totalExpense">-0,00 €</div>
+    </div>
+  </div>
+
+  <div class="main-grid">
+    <!-- Formulaire d'ajout -->
+    <div class="card">
+      <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Ajouter une transaction</h2>
+      <form id="transactionForm">
+        <div class="type-toggle">
+          <button type="button" class="type-btn active-expense" id="btnExpense" onclick="setType('expense')">Dépense</button>
+          <button type="button" class="type-btn" id="btnIncome" onclick="setType('income')">Revenu</button>
+        </div>
+
+        <div class="form-group">
+          <label for="description">Description</label>
+          <input type="text" id="description" placeholder="ex: Courses de la semaine" required>
+        </div>
+
+        <div class="form-group">
+          <label for="amount">Montant (€)</label>
+          <input type="number" id="amount" step="0.01" min="0.01" placeholder="0.00" required>
+        </div>
+
+        <div class="form-group" id="categoryGroup">
+          <label for="category">Catégorie</label>
+          <select id="category">
+            <option value="loyer">Loyer</option>
+            <option value="nourriture">Nourriture</option>
+            <option value="transport">Transport</option>
+            <option value="loisirs">Loisirs</option>
+            <option value="autre">Autre</option>
+          </select>
+        </div>
+
+        <button type="submit" class="submit-btn">Enregistrer</button>
+      </form>
+    </div>
+
+    <!-- Graphique Interactif -->
+    <div class="card">
+      <h2 style="font-size: 1.1rem; margin-bottom: 0.25rem;">Dépenses par catégorie</h2>
+      <p style="font-size: 0.8rem; color: var(--subtext); margin-bottom: 0.5rem;">Cliquer sur un segment pour filtrer l'historique.</p>
+      <div class="chart-container">
+        <canvas id="expenseChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Suivi des Budgets par Catégorie -->
+  <div class="card">
+    <h2 style="font-size: 1.1rem;">Objectifs de budget mensuel</h2>
+    <div class="budget-list" id="budgetList"></div>
+  </div>
+
+  <!-- Historique des Transactions (Filtrable) -->
+  <div class="card">
+    <div class="history-header">
+      <h2 style="font-size: 1.1rem;" id="historyTitle">Historique des transactions</h2>
+      <button class="view-all-btn" id="viewAllBtn" onclick="resetFilter()">Voir Tout</button>
+    </div>
+    <ul class="transaction-list" id="transactionList"></ul>
+  </div>
+</div>
+
+<script>
+  // --- STATE MANAGEMENT ---
+  let transactions = JSON.parse(localStorage.getItem('transactions')) || [
+    { id: 1, description: 'Salaire', amount: 2500, type: 'income', category: 'revenu' },
+    { id: 2, description: 'Loyer', amount: 800, type: 'expense', category: 'loyer' },
+    { id: 3, description: 'Supermarché', amount: 150, type: 'expense', category: 'nourriture' }
+  ];
+
+  let budgets = JSON.parse(localStorage.getItem('budgets')) || {
+    loyer: 800, nourriture: 300, transport: 100, loisirs: 150, autre: 100
+  };
+
+  let currentType = 'expense';
+  let chartInstance = null;
+  let currentFilterCategory = null; // Stocke la catégorie filtrée
+
+  const categories = ['loyer', 'nourriture', 'transport', 'loisirs', 'autre'];
+  const categoryColors = ['#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6', '#64748b'];
+
+  // --- CORE FUNCTIONS (SAVE & RENDER) ---
+  function saveAndRender() {
+    localStorage.setItem('transactions', JSON.stringify(transactions));
+    updateSummary();
+    updateChart();
+    renderBudgets();
+    renderList(); // Renders list based on currentFilterCategory
+  }
+
+  // --- UI HELPERS ---
+  function setType(type) {
+    currentType = type;
+    const btnExpense = document.getElementById('btnExpense');
+    const btnIncome = document.getElementById('btnIncome');
+    const catGroup = document.getElementById('categoryGroup');
+
+    if (type === 'expense') {
+      btnExpense.className = 'type-btn active-expense';
+      btnIncome.className = 'type-btn';
+      catGroup.style.display = 'flex';
+    } else {
+      btnIncome.className = 'type-btn active-income';
+      btnExpense.className = 'type-btn';
+      catGroup.style.display = 'none';
+    }
+  }
+
+  function resetFilter() {
+    currentFilterCategory = null;
+    saveAndRender();
+  }
+
+  // --- FORM HANDLING ---
+  document.getElementById('transactionForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const description = document.getElementById('description').value;
+    const amount = parseFloat(document.getElementById('amount').value);
+    const category = currentType === 'expense' ? document.getElementById('category').value : 'revenu';
+
+    transactions.push({ id: Date.now(), description, amount, type: currentType, category });
+    
+    // Si on ajoute dans la catégorie actuellement filtrée, on reste dessus, sinon on reset
+    if (currentType === 'expense' && category !== currentFilterCategory) {
+        currentFilterCategory = null; 
+    }
+
+    saveAndRender();
+    document.getElementById('description').value = '';
+    document.getElementById('amount').value = '';
+  });
+
+  // --- DATA MANIPULATION ---
+  function deleteTransaction(id) {
+    transactions = transactions.filter(t => t.id !== id);
+    saveAndRender();
+  }
+
+  function updateBudgetGoal(category, value) {
+    budgets[category] = parseFloat(value) || 0;
+    localStorage.setItem('budgets', JSON.stringify(budgets));
+    renderBudgets();
+  }
+
+  // --- RENDERING FUNCTIONS ---
+
+  function updateSummary() {
+    const income = transactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+    const expense = transactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
+    const balance = income - expense;
+
+    document.getElementById('totalBalance').innerText = `${balance.toFixed(2)} €`;
+    document.getElementById('totalIncome').innerText = `+${income.toFixed(2)} €`;
+    document.getElementById('totalExpense').innerText = `-${expense.toFixed(2)} €`;
+  }
+
+  function renderBudgets() {
+    const container = document.getElementById('budgetList');
+    container.innerHTML = '';
+
+    categories.forEach(cat => {
+      const spent = transactions
+        .filter(t => t.type === 'expense' && t.category === cat)
+        .reduce((acc, t) => acc + t.amount, 0);
+      const limit = budgets[cat] || 0;
+      const ratio = limit > 0 ? (spent / limit) : 0;
+      const percentage = Math.round(ratio * 100);
+
+      let statusClass = 'status-ok';
+      if (ratio >= 1) statusClass = 'status-exceeded';
+      else if (ratio >= 0.8) statusClass = 'status-warning';
+
+      const item = document.createElement('div');
+      item.className = 'budget-item';
+      item.innerHTML = `
+        <div class="budget-header">
+          <span class="budget-cat">${cat.charAt(0).toUpperCase() + cat.slice(1)}</span>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="budget-stats">${spent.toFixed(2)} € / </span>
+            <input type="number" class="budget-input" min="0" step="10" value="${limit}" onchange="updateBudgetGoal('${cat}', this.value)"> €
+            <span style="font-weight: 600; font-size: 0.85rem; min-width: 45px; text-align: right;">(${percentage}%)</span>
+          </div>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill ${statusClass}" style="width: ${Math.min(percentage, 100)}%;"></div>
+        </div>
+      `;
+      container.appendChild(item);
+    });
+  }
+
+  // RENDU DE LA LISTE (Avec filtrage dynamique)
+  function renderList() {
+    const list = document.getElementById('transactionList');
+    const title = document.getElementById('historyTitle');
+    const viewAllBtn = document.getElementById('viewAllBtn');
+    list.innerHTML = '';
+
+    let listTransactions = transactions;
+
+    // Appliquer le filtre si nécessaire
+    if (currentFilterCategory) {
+        listTransactions = transactions.filter(t => t.type === 'expense' && t.category === currentFilterCategory);
+        title.innerText = `Dépenses : ${currentFilterCategory.charAt(0).toUpperCase() + currentFilterCategory.slice(1)}`;
+        viewAllBtn.style.display = 'inline-block';
+    } else {
+        title.innerText = 'Historique des transactions';
+        viewAllBtn.style.display = 'none';
+    }
+
+    if (listTransactions.length === 0) {
+        list.innerHTML = '<li style="text-align:center; color:var(--subtext); padding:1rem; font-size:0.9rem;">Aucune transaction trouvée.</li>';
+        return;
+    }
+
+    listTransactions.slice().reverse().forEach(t => {
+      const li = document.createElement('li');
+      li.className = 'transaction-item';
+      const isIncome = t.type === 'income';
+      
+      li.innerHTML = `
+        <div class="item-info">
+          <span class="item-desc">${t.description}</span>
+          <span class="item-cat">${isIncome ? 'Revenu' : t.category.charAt(0).toUpperCase() + t.category.slice(1)}</span>
+        </div>
+        <div class="item-right">
+          <span class="item-amount" style="color: ${isIncome ? 'var(--income)' : 'var(--expense)'}">
+            ${isIncome ? '+' : '-'}${t.amount.toFixed(2)} €
+          </span>
+          <button class="delete-btn" onclick="deleteTransaction(${t.id})">&times;</button>
+        </div>
+      `;
+      list.appendChild(li);
+    });
+  }
+
+  // --- CHART LOGIC (With Interaction) ---
+  function updateChart() {
+    const ctx = document.getElementById('expenseChart').getContext('2d');
+    
+    const categoryTotals = categories.map(cat => {
+      return transactions
+        .filter(t => t.type === 'expense' && t.category === cat)
+        .reduce((acc, t) => acc + t.amount, 0);
+    });
+
+    if (chartInstance) { chartInstance.destroy(); }
+
+    chartInstance = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: categories.map(c => c.charAt(0).toUpperCase() + c.slice(1)),
+        datasets: [{
+          data: categoryTotals,
+          backgroundColor: categoryColors,
+          borderWidth: 2,
+          hoverOffset: 15 // Effet visuel au survol
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 12, padding: 15 } },
+          tooltip: {
+            callbacks: {
+              label: (context) => ` ${context.label}: ${context.parsed.toFixed(2)} €`
+            }
+          }
+        },
+        // CAPTURER LE CLIC SUR LE GRAPHIQUE
+        onClick: (event, elements) => {
+          if (elements.length > 0) {
+            const index = elements[0].index;
+            const clickedCategory = categories[index];
+            
+            // Appliquer le filtre et mettre à jour la liste
+            currentFilterCategory = clickedCategory;
+            renderList(); 
+          }
+        }
+      }
+    });
+  }
+
+  // --- INITIAL LAUNCH ---
+  saveAndRender();
+</script>
+</body>
+</html>
